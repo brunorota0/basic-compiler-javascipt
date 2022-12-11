@@ -1,5 +1,3 @@
-10 a%=10
-20 IF a=11 THEN
-30  PRINT "Is 10"
-40 ELSE
-50  PRINT "Is NOT 10"
+1 a%=10
+10 FOR i=1 TO a
+20  PRINT "ASD"

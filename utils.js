@@ -15,6 +15,8 @@ const RESERVED_WORDS = {
   IF: "IF",
   THEN: "THEN",
   ELSE: "ELSE",
+  FOR: "FOR",
+  TO: "TO",
 };
 
 const COMPARATORS = ["=", "<", ">"];
@@ -198,6 +200,96 @@ const processTokens = (tokens, tokensLength, lineObject, lines) => {
                     "GOTO command must be followed only by a number."
                   );
                 }
+                break;
+              }
+
+              case RESERVED_WORDS.FOR: {
+                const expression = {
+                  type: "CallExpression",
+                  name: RESERVED_WORDS.FOR,
+                  arguments: [],
+                };
+
+                const initToken = tokens.shift();
+                const initTokenValue = initToken.value.split("=");
+                expression.arguments.push({
+                  type: "Variable",
+                  value: parseInt(initTokenValue[1]),
+                  name: initTokenValue[0],
+                });
+
+                if (!expression.arguments[0].value) {
+                  throw new Error(
+                    "Initial value not specified for FOR statement"
+                  );
+                }
+
+                const toToken = tokens.shift();
+                if (toToken.value !== RESERVED_WORDS.TO) {
+                  throw new Error("TO not specified for FOR statement");
+                }
+
+                const toValueToken = tokens.shift();
+                if (toValueToken.type === TOKEN_TYPES.NUMBER) {
+                  expression.arguments.push({
+                    type: "To",
+                    value: parseInt(toValueToken.value),
+                  });
+                } else {
+                  if (toValueToken.type === TOKEN_TYPES.WORD) {
+                    const variableArg = expression.arguments.find(
+                      (arg) => arg.type === "Variable"
+                    );
+
+                    const referenceExists = globalVariables[toValueToken.value];
+
+                    if (!referenceExists)
+                      throw new Error(
+                        `Variable ${toValueToken.value} cannot be accessed before initialization.`
+                      );
+
+                    expression.arguments.push({
+                      type: "To",
+                      value: toValueToken.value,
+                    });
+                  }
+                }
+
+                if (expression.arguments.length !== 2 || tokens.length > 0) {
+                  throw new Error("Error in FOR statement declaration");
+                }
+
+                expression.arguments.push({
+                  type: "Content",
+                  value: [],
+                });
+
+                // Check for iteration content
+                while (lines[0] && lines[0][1].value.includes("/t")) {
+                  const nextElseLineTokens = removeTabsFromTokens(
+                    lines.shift()
+                  );
+
+                  const nextElseLineObject = {
+                    number: 0,
+                    content: [],
+                  };
+
+                  processTokens(
+                    nextElseLineTokens,
+                    nextElseLineTokens.length,
+                    nextElseLineObject,
+                    lines
+                  );
+
+                  const contentArguments = expression.arguments.find(
+                    (arg) => arg.type === "Content"
+                  );
+
+                  contentArguments.value.push(nextElseLineObject);
+                }
+
+                lineObject.content.push(expression);
                 break;
               }
 
@@ -418,6 +510,9 @@ export const generator = (basic_ast) => {
 
       if (!content) return;
 
+      // Uncomment to debug the final tree
+      // console.log(JSON.stringify(content, null, 2));
+
       const result = executeContent(content, globalVariables);
 
       if (result && !isNaN(result)) {
@@ -471,7 +566,7 @@ const executeContent = (content) => {
         result = statement.arguments[0].value;
         break;
 
-      case RESERVED_WORDS.IF:
+      case RESERVED_WORDS.IF: {
         const args = statement.arguments;
         const conditionResult = performCondition(args[0]);
         if (conditionResult) {
@@ -496,6 +591,31 @@ const executeContent = (content) => {
           }
         }
         break;
+      }
+
+      case RESERVED_WORDS.FOR: {
+        const args = statement.arguments;
+        let variableToken = args.find((arg) => arg.type === "Variable");
+        const toToken = args.find((arg) => arg.type === "To");
+        const contentToken = args.find((arg) => arg.type === "Content");
+
+        let toValue;
+        if (isNaN(toToken.value)) {
+          toValue = globalVariables[toToken.value];
+        } else {
+          toValue = toToken.value;
+        }
+
+        while (variableToken.value <= toValue) {
+          contentToken.value.forEach((value) => {
+            result = executeContent(value.content);
+          });
+
+          variableToken.value++;
+        }
+
+        break;
+      }
     }
   });
 
