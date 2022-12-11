@@ -14,6 +14,7 @@ const RESERVED_WORDS = {
   VARIABLE: "VARIABLE",
   IF: "IF",
   THEN: "THEN",
+  ELSE: "ELSE",
 };
 
 const COMPARATORS = ["=", "<", ">"];
@@ -64,6 +65,17 @@ export const lexer = (code) => {
 };
 
 const clearToken = (token) => token.replace(/['"]+/g, "").replace("\r", "");
+const removeTabsFromTokens = (tokens) =>
+  tokens.map((token) => {
+    if (typeof token.value === "string" && token.value.includes("/t")) {
+      return {
+        ...token,
+        value: token.value.replace("/t", ""),
+      };
+    } else {
+      return token;
+    }
+  });
 
 const processTokens = (tokens, tokensLength, lineObject, lines) => {
   try {
@@ -238,34 +250,72 @@ const processTokens = (tokens, tokensLength, lineObject, lines) => {
                     });
 
                     // Check next line
-                    while (lines[0][1].value.includes("/t")) {
-                      const nextLineTokens = lines.shift().map((token) => {
+                    while (
+                      lines[0] &&
+                      (lines[0][1].value.includes("/t") ||
+                        lines[0][1].value === RESERVED_WORDS.ELSE)
+                    ) {
+                      if (lines[0][1].value.includes("/t")) {
+                        const nextLineTokens = removeTabsFromTokens(
+                          lines.shift()
+                        );
+
+                        const nextLineObject = {
+                          number: 0,
+                          content: [],
+                        };
+
+                        processTokens(
+                          nextLineTokens,
+                          nextLineTokens.length,
+                          nextLineObject,
+                          lines
+                        );
+
+                        expression.arguments[1].value.push(nextLineObject);
+                      } else if (lines[0][1].value === RESERVED_WORDS.ELSE) {
+                        // Skip else line
+                        lines.shift();
+
                         if (
-                          typeof token.value === "string" &&
-                          token.value.includes("/t")
+                          !expression.arguments.some(
+                            (x) => x.value && x.value.length > 0
+                          )
                         ) {
-                          return {
-                            ...token,
-                            value: token.value.replace("/t", ""),
-                          };
-                        } else {
-                          return token;
+                          throw new Error(
+                            "Missing THEN content before use ELSE statement"
+                          );
                         }
-                      });
 
-                      const nextLineObject = {
-                        number: 0,
-                        content: [],
-                      };
+                        expression.arguments.push({
+                          type: "Else",
+                          value: [],
+                        });
 
-                      processTokens(
-                        nextLineTokens,
-                        nextLineTokens.length,
-                        nextLineObject,
-                        lines
-                      );
+                        while (lines[0] && lines[0][1].value.includes("/t")) {
+                          const nextElseLineTokens = removeTabsFromTokens(
+                            lines.shift()
+                          );
 
-                      expression.arguments[1].value.push(nextLineObject);
+                          const nextElseLineObject = {
+                            number: 0,
+                            content: [],
+                          };
+
+                          processTokens(
+                            nextElseLineTokens,
+                            nextElseLineTokens.length,
+                            nextElseLineObject,
+                            lines
+                          );
+
+                          const elseArguments = expression.arguments.find(
+                            (arg) => arg.type === "Else"
+                          );
+
+                          elseArguments.value.push(nextElseLineObject);
+                        }
+                      }
                     }
 
                     if (expression.arguments[1].value.length === 0) {
@@ -433,6 +483,16 @@ const executeContent = (content) => {
                 result = executeContent(value.content);
               });
             }
+          }
+        } else {
+          const elseArgs = args.find((arg) => arg.type === "Else");
+
+          if (!isNaN(elseArgs.value)) {
+            result = elseArgs.value;
+          } else {
+            elseArgs.value.forEach((value) => {
+              result = executeContent(value.content);
+            });
           }
         }
         break;
